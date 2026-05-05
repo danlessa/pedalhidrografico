@@ -175,18 +175,22 @@ function findCol(cols, name) {
 
 // ─── RideWithGPS fetch ────────────────────────────────────────────────────────
 async function fetchRouteData(id) {
-  // Attempt 1: native .gpx export with auth — includes <wpt> cues if present.
+  // Attempt 1: native .gpx export with auth — includes <wpt> cues + <ele> per
+  // trkpt, which we use to compute total distance / ascent / descent.
   const gpxUrl = decorateRwgps(new URL(`https://ridewithgps.com/routes/${id}.gpx`));
   const gpxRes = await fetch(gpxUrl);
   if (gpxRes.ok) {
     const text = await gpxRes.text();
-    const latlngs = parseGpxLatLngs(text);
+    const points = parseGpxPoints(text);
     const pois = parseGpxPois(text);
-    if (latlngs.length > 0) return { latlngs, pois };
+    if (points.length > 0) {
+      const latlngs = points.map((p) => [p.lat, p.lon]);
+      const stats = computeRouteStats(points);
+      return { latlngs, pois, stats };
+    }
   }
 
-  // Attempt 2: JSON endpoint → track_points + course_points (the JSON
-  // equivalent of POIs, when present).
+  // Attempt 2: JSON endpoint → track_points + course_points.
   const jsonUrl = decorateRwgps(new URL(`https://ridewithgps.com/routes/${id}.json`));
   const jsonRes = await fetch(jsonUrl, { headers: { Accept: 'application/json' } });
   if (!jsonRes.ok) {
@@ -200,12 +204,16 @@ async function fetchRouteData(id) {
   if (!Array.isArray(pts) || pts.length === 0) {
     throw new Error('json had no track_points');
   }
-  const latlngs = pts
-    .map((p) => [p.y ?? p.lat, p.x ?? p.lon])
-    .filter(([a, b]) => Number.isFinite(a) && Number.isFinite(b));
+  const points = pts
+    .map((p) => ({
+      lat: p.y ?? p.lat,
+      lon: p.x ?? p.lon,
+      ele: Number.isFinite(p.e) ? p.e : (Number.isFinite(p.elevation) ? p.elevation : null),
+    }))
+    .filter((p) => Number.isFinite(p.lat) && Number.isFinite(p.lon));
+  const latlngs = points.map((p) => [p.lat, p.lon]);
+  const stats = computeRouteStats(points);
 
-  // RWGPS JSON exposes POIs under route.points_of_interest; cues under
-  // route.course_points (turn instructions — usually skipped for POI display).
   const rawPois = data?.route?.points_of_interest || data?.points_of_interest || [];
   const pois = rawPois
     .map((p) => ({
@@ -217,7 +225,7 @@ async function fetchRouteData(id) {
     }))
     .filter((p) => Number.isFinite(p.lat) && Number.isFinite(p.lng));
 
-  return { latlngs, pois };
+  return { latlngs, pois, stats };
 }
 
 function decorateRwgps(url) {
@@ -228,22 +236,61 @@ function decorateRwgps(url) {
   return url;
 }
 
-// Lightweight GPX parser (no DOM needed).
-function parseGpxLatLngs(gpxText) {
+// Lightweight GPX parser (no DOM needed). Returns [{lat, lon, ele}], with
+// ele=null when not present. Handles both self-closing and child-bearing
+// <trkpt>/<rtept> elements.
+function parseGpxPoints(gpxText) {
+  const re = /<(trkpt|rtept)\s+([^>]*?)(?:\/>|>([\s\S]*?)<\/\1\s*>)/gi;
   const out = [];
-  const tagRe = /<(?:trkpt|rtept)\s+([^>/]*)\/?>/gi;
   let m;
-  while ((m = tagRe.exec(gpxText))) {
-    const attrs = m[1];
-    const lat = /\blat\s*=\s*"([^"]+)"/i.exec(attrs);
-    const lon = /\blon\s*=\s*"([^"]+)"/i.exec(attrs);
-    if (lat && lon) {
-      const la = parseFloat(lat[1]);
-      const lo = parseFloat(lon[1]);
-      if (Number.isFinite(la) && Number.isFinite(lo)) out.push([la, lo]);
+  while ((m = re.exec(gpxText))) {
+    const lat = /\blat\s*=\s*"([^"]+)"/i.exec(m[2]);
+    const lon = /\blon\s*=\s*"([^"]+)"/i.exec(m[2]);
+    if (!lat || !lon) continue;
+    const la = parseFloat(lat[1]);
+    const lo = parseFloat(lon[1]);
+    if (!Number.isFinite(la) || !Number.isFinite(lo)) continue;
+    let ele = null;
+    if (m[3]) {
+      const eleM = /<ele>([^<]+)<\/ele>/i.exec(m[3]);
+      if (eleM) {
+        const e = parseFloat(eleM[1]);
+        if (Number.isFinite(e)) ele = e;
+      }
     }
+    out.push({ lat: la, lon: lo, ele });
   }
   return out;
+}
+
+function computeRouteStats(points) {
+  let dist = 0, ascent = 0, descent = 0;
+  for (let i = 1; i < points.length; i++) {
+    const a = points[i - 1];
+    const b = points[i];
+    dist += haversineMeters(a.lat, a.lon, b.lat, b.lon);
+    if (a.ele != null && b.ele != null) {
+      const dh = b.ele - a.ele;
+      if (dh > 0) ascent += dh;
+      else descent += -dh;
+    }
+  }
+  return {
+    distMeters: Math.round(dist),
+    ascentMeters: Math.round(ascent),
+    descentMeters: Math.round(descent),
+  };
+}
+
+function haversineMeters(lat1, lon1, lat2, lon2) {
+  const R = 6371000;
+  const rad = (d) => (d * Math.PI) / 180;
+  const dLat = rad(lat2 - lat1);
+  const dLon = rad(lon2 - lon1);
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(rad(lat1)) * Math.cos(rad(lat2)) * Math.sin(dLon / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(a));
 }
 
 // Pull <wpt> elements (cues / POIs in RWGPS exports). Each looks like:

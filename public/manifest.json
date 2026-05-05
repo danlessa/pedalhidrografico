@@ -2,7 +2,7 @@
   "name": "Ajudante cartográfica-energética para passeios topo hidrográficos na Grande São Paulo",
   "short_name": "Pedal Hidrográfico",
   "description": "Mapa, traçado e simulação energética para os passeios topo-hidrográficos na Grande São Paulo.",
-  "start_url": "./",
+  "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",
   "orientation": "any",

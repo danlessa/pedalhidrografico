@@ -8,7 +8,9 @@
     "node": ">=18"
   },
   "scripts": {
-    "build:routes": "node scripts/build-routes.mjs"
+    "build:routes": "node scripts/build-routes.mjs",
+    "deploy": "bash scripts/deploy.sh",
+    "deploy:dry": "bash scripts/deploy.sh --dry-run"
   },
   "dependencies": {
     "dotenv": "^16.4.5"

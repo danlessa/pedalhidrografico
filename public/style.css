@@ -42,17 +42,19 @@ body {
   border-bottom: 1px solid var(--border);
 }
 
-/* Hamburger only shown on narrow viewports. */
-.menu-btn {
-  display: none;
-  background: transparent;
-  color: var(--text);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 4px 10px;
-  font-size: 18px;
-  line-height: 1;
-  cursor: pointer;
+/* "Rotas" button: shown on all viewports — toggles drawer on mobile, hides
+   the right-side panel on desktop. */
+.menu-btn { display: inline-block; }
+
+/* Desktop hide: single-column layout when the user has collapsed the sidebar. */
+@media (min-width: 761px) {
+  body.sidebar-hidden {
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      "topbar"
+      "map";
+  }
+  body.sidebar-hidden .sidebar { display: none; }
 }
 
 .topbar .title {
@@ -495,6 +497,35 @@ body {
 }
 .route-modal-meta .edit-route-btn:hover {
   background: rgba(45, 169, 255, 0.18);
+}
+
+/* Floating route preview tooltip (hover over a sidebar item). */
+.route-tooltip {
+  position: fixed;
+  transform: translateY(-50%);
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 12px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.55);
+  z-index: 6500;
+  pointer-events: none;
+  max-width: 280px;
+  font-size: 12px;
+  line-height: 1.35;
+}
+.route-tooltip[hidden] { display: none; }
+.route-tooltip strong {
+  display: block;
+  font-size: 13px;
+  margin-bottom: 2px;
+}
+.route-tooltip .rt-meta { color: var(--muted); font-size: 11px; }
+.route-tooltip .rt-stats {
+  margin-top: 4px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
 }
 
 /* Toast (non-blocking status) */

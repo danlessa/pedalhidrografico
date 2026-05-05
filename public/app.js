@@ -360,18 +360,52 @@ layersBtn?.addEventListener('click', () => {
   try { localStorage.setItem(LAYERS_HIDDEN_KEY, nowHidden ? '1' : '0'); } catch {}
 });
 
-// ─── Mobile sidebar drawer ───────────────────────────────────────────────────
+// ─── Sidebar toggle (mobile drawer + desktop hide) ───────────────────────────
+// Two distinct states so behavior matches each viewport:
+//   .sidebar-open   — explicit "show now" on mobile (drawer slide-in).
+//   .sidebar-hidden — explicit "hide" on desktop (map gets full width).
 const menuBtn = document.getElementById('menu-btn');
+const SIDEBAR_HIDDEN_KEY = 'phidro:sidebarHidden';
+const isMobileViewport = () => window.matchMedia('(max-width: 760px)').matches;
+
+// Restore persisted desktop state on boot.
+if (localStorage.getItem(SIDEBAR_HIDDEN_KEY) === '1') {
+  document.body.classList.add('sidebar-hidden');
+}
+updateMenuBtnPressed();
+
 menuBtn?.addEventListener('click', (e) => {
   e.stopPropagation();
-  document.body.classList.toggle('sidebar-open');
+  if (isMobileViewport()) {
+    document.body.classList.toggle('sidebar-open');
+  } else {
+    const nowHidden = !document.body.classList.contains('sidebar-hidden');
+    document.body.classList.toggle('sidebar-hidden', nowHidden);
+    try { localStorage.setItem(SIDEBAR_HIDDEN_KEY, nowHidden ? '1' : '0'); } catch {}
+    // Trigger a Leaflet reflow so the map fills the new width cleanly.
+    setTimeout(() => map.invalidateSize(), 220);
+  }
+  updateMenuBtnPressed();
 });
-// Tap outside the drawer closes it.
+
+// Tap outside the drawer closes it (mobile only).
 document.addEventListener('click', (e) => {
+  if (!isMobileViewport()) return;
   if (!document.body.classList.contains('sidebar-open')) return;
   if (e.target.closest('#sidebar') || e.target.closest('#menu-btn')) return;
   document.body.classList.remove('sidebar-open');
+  updateMenuBtnPressed();
 });
+
+window.addEventListener('resize', updateMenuBtnPressed);
+
+function updateMenuBtnPressed() {
+  if (!menuBtn) return;
+  const visible = isMobileViewport()
+    ? document.body.classList.contains('sidebar-open')
+    : !document.body.classList.contains('sidebar-hidden');
+  menuBtn.setAttribute('aria-pressed', String(visible));
+}
 
 // ─── PWA: register service worker ────────────────────────────────────────────
 if ('serviceWorker' in navigator) {
@@ -508,12 +542,80 @@ function addRouteToSidebar(entry) {
     <span class="route-number sidebar-badge">${numberLabel ? escapeHtml(numberLabel) : '·'}</span>
     <div>
       <strong>${escapeHtml(buildLabel(entry))}</strong>
-      <span class="route-meta">RWGPS ${entry.id}${entry.igPost ? ' · IG' : ''}</span>
     </div>
   `;
   li.addEventListener('click', () => openRouteModal(entry.id));
+  li.addEventListener('mouseenter', () => onRouteRowHover(entry, li, true));
+  li.addEventListener('mouseleave', () => onRouteRowHover(entry, li, false));
   routesList.appendChild(li);
   return li;
+}
+
+// ─── Sidebar hover preview (highlight on map + floating stats tooltip) ───────
+const routeTooltip = document.getElementById('route-tooltip');
+
+function onRouteRowHover(entry, li, hovering) {
+  const r = routes.get(entry.id);
+  if (!r || drawingMode) {
+    if (!hovering) hideRouteTooltip();
+    return;
+  }
+  if (hovering) {
+    highlightRoute(r);
+    showRouteTooltip(entry, li);
+  } else {
+    unhighlightRoute(r);
+    hideRouteTooltip();
+  }
+}
+
+function highlightRoute(r) {
+  if (!r.layer) return;
+  // Remember original style once so repeated hovers don't drift.
+  if (!r._hoverOrig) {
+    r._hoverOrig = {
+      color: r.layer.options.color || '#ffffff',
+      weight: r.layer.options.weight || 3.5,
+    };
+  }
+  r.layer.setStyle({ color: '#ffb547', weight: 6 });
+  if (r.layer.bringToFront) r.layer.bringToFront();
+}
+function unhighlightRoute(r) {
+  if (r.layer && r._hoverOrig) {
+    r.layer.setStyle(r._hoverOrig);
+  }
+}
+
+function showRouteTooltip(entry, li) {
+  if (!routeTooltip) return;
+  const stats = entry.stats;
+  const numberLabel = entry.number?.value
+    ? `${entry.number.source} ${entry.number.value}`
+    : '';
+  const km =
+    stats?.distMeters != null
+      ? `${(stats.distMeters / 1000).toFixed(1).replace('.', ',')} km`
+      : '';
+  const asc = stats?.ascentMeters != null ? `↑${stats.ascentMeters} m` : '';
+  const desc = stats?.descentMeters != null ? `↓${stats.descentMeters} m` : '';
+  const statsLine = [km, asc, desc].filter(Boolean).join(' · ');
+  const metaLine = [entry.date, numberLabel].filter(Boolean).join(' · ');
+  routeTooltip.innerHTML =
+    `<strong>${escapeHtml(entry.name || `Route ${entry.id}`)}</strong>` +
+    (metaLine ? `<div class="rt-meta">${escapeHtml(metaLine)}</div>` : '') +
+    (statsLine ? `<div class="rt-stats">${statsLine}</div>` : '');
+
+  // Position to the LEFT of the sidebar item (sidebar sits on the right edge),
+  // vertically centered on the row.
+  const rect = li.getBoundingClientRect();
+  routeTooltip.style.right = `${Math.max(8, window.innerWidth - rect.left + 8)}px`;
+  routeTooltip.style.top = `${rect.top + rect.height / 2}px`;
+  routeTooltip.style.left = 'auto';
+  routeTooltip.hidden = false;
+}
+function hideRouteTooltip() {
+  if (routeTooltip) routeTooltip.hidden = true;
 }
 
 function buildLabel(entry) {

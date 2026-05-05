@@ -1,10 +1,111 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  <rect width="512" height="512" rx="96" ry="96" fill="#0f1721"/>
-  <path d="M -20 380 Q 96 340 200 380 T 420 380 T 540 380 L 540 540 L -20 540 Z" fill="#2da9ff" opacity="0.35"/>
-  <path d="M -20 420 Q 96 380 200 420 T 420 420 T 540 420 L 540 540 L -20 540 Z" fill="#2da9ff" opacity="0.55"/>
-  <path d="M -20 460 Q 96 420 200 460 T 420 460 T 540 460 L 540 540 L -20 540 Z" fill="#2da9ff" opacity="0.85"/>
-  <text x="256" y="280" text-anchor="middle"
-        font-family="Helvetica, Arial, sans-serif"
-        font-weight="800" font-size="220" fill="#fff"
-        letter-spacing="-6">PH</text>
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%"  stop-color="#1a2440"/>
+      <stop offset="38%" stop-color="#5a3050"/>
+      <stop offset="62%" stop-color="#e85a3e"/>
+      <stop offset="80%" stop-color="#ffb547"/>
+      <stop offset="100%" stop-color="#ffd07a"/>
+    </linearGradient>
+    <linearGradient id="water" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%"  stop-color="#2da9ff"/>
+      <stop offset="100%" stop-color="#1d4f7a"/>
+    </linearGradient>
+    <clipPath id="round">
+      <rect width="512" height="512" rx="96" ry="96"/>
+    </clipPath>
+  </defs>
+
+  <g clip-path="url(#round)">
+    <!-- Sky: navy → magenta → orange → yellow (Paulista sunset) -->
+    <rect width="512" height="512" fill="url(#sky)"/>
+
+    <!-- Setting sun -->
+    <circle cx="370" cy="195" r="46" fill="#fff5cc" opacity="0.95"/>
+    <circle cx="370" cy="195" r="74" fill="#ffd380" opacity="0.32"/>
+
+    <!-- Far rolling hills -->
+    <path d="M -10 270 Q 90 230 180 250 T 360 240 T 522 260 L 522 330 L -10 330 Z"
+          fill="#1c2540" opacity="0.7"/>
+
+    <!-- Closer hills -->
+    <path d="M -10 320 Q 80 290 180 305 T 360 300 T 522 318 L 522 380 L -10 380 Z"
+          fill="#0d1424"/>
+
+    <!-- City skyline: mix of tall, short, narrow, wide buildings to
+         suggest São Paulo's contrasts (wealthy towers + small blocks). -->
+    <g fill="#080c18">
+      <!-- Left district -->
+      <rect x="38"  y="285" width="22" height="42"/>
+      <rect x="65"  y="270" width="26" height="57"/>
+      <rect x="95"  y="252" width="30" height="75"/>
+      <rect x="128" y="232" width="32" height="95"/>
+      <rect x="138" y="216" width="12" height="16"/>
+      <!-- Edifício Itália-style with triangle top -->
+      <rect x="166" y="245" width="40" height="82"/>
+      <polygon points="166,245 206,245 186,220"/>
+      <!-- Banespa-style with stepped crown -->
+      <rect x="214" y="252" width="36" height="75"/>
+      <rect x="223" y="234" width="20" height="18"/>
+      <rect x="229" y="222" width="8"  height="12"/>
+      <!-- Smaller residential cluster -->
+      <rect x="258" y="278" width="22" height="49"/>
+      <rect x="284" y="270" width="26" height="57"/>
+      <!-- Edifício Copan curve approximation -->
+      <path d="M 318 258 Q 350 252 384 258 Q 392 290 384 327 L 318 327 Q 310 290 318 258 Z"/>
+      <!-- Right district -->
+      <rect x="394" y="278" width="22" height="49"/>
+      <rect x="420" y="262" width="28" height="65"/>
+      <rect x="427" y="248" width="14" height="14"/>
+      <rect x="454" y="280" width="22" height="47"/>
+      <rect x="480" y="270" width="20" height="57"/>
+    </g>
+
+    <!-- Warm window lights (sparse) -->
+    <g fill="#ffe26b">
+      <rect x="143" y="260" width="3" height="3"/>
+      <rect x="150" y="276" width="3" height="3"/>
+      <rect x="143" y="292" width="3" height="3"/>
+      <rect x="150" y="308" width="3" height="3"/>
+      <rect x="178" y="270" width="3" height="3"/>
+      <rect x="190" y="290" width="3" height="3"/>
+      <rect x="226" y="280" width="3" height="3"/>
+      <rect x="240" y="295" width="3" height="3"/>
+      <rect x="333" y="278" width="3" height="3"/>
+      <rect x="350" y="295" width="3" height="3"/>
+      <rect x="365" y="280" width="3" height="3"/>
+      <rect x="430" y="280" width="3" height="3"/>
+      <rect x="438" y="295" width="3" height="3"/>
+    </g>
+
+    <!-- Urban stream / hydrography accent -->
+    <path d="M -10 360 Q 80 340 180 360 T 380 365 T 522 350 L 522 472 Q 380 458 280 472 T 80 466 T -10 472 Z"
+          fill="url(#water)"/>
+    <path d="M 30 384 Q 100 376 180 384 T 360 390 T 500 382"
+          fill="none" stroke="#a3d9ff" stroke-width="2" opacity="0.7"/>
+    <path d="M 50 410 Q 130 404 200 410 T 380 414 T 480 406"
+          fill="none" stroke="#a3d9ff" stroke-width="1.5" opacity="0.5"/>
+    <path d="M 70 432 Q 150 426 220 432 T 400 436"
+          fill="none" stroke="#a3d9ff" stroke-width="1.2" opacity="0.4"/>
+
+    <!-- Bicycle (foreground, white silhouette) -->
+    <g transform="translate(150, 432)" fill="none" stroke="#ffffff"
+       stroke-width="10" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="0"   cy="0" r="42"/>
+      <circle cx="142" cy="0" r="42"/>
+      <line x1="0"  y1="0"   x2="70" y2="-32"/>
+      <line x1="70" y1="-32" x2="142" y2="0"/>
+      <line x1="70" y1="-32" x2="94" y2="0"/>
+      <line x1="0"  y1="0"   x2="94" y2="0"/>
+      <line x1="70" y1="-32" x2="74" y2="-52"/>
+      <line x1="94" y1="0"   x2="124" y2="-46"/>
+      <line x1="108" y1="-32" x2="134" y2="-32"/>
+    </g>
+
+    <!-- Energy bolt (kJ accent) -->
+    <g transform="translate(248, 408)">
+      <polygon points="0,-20 14,-20 7,0 20,0 -3,34 5,8 -10,8"
+               fill="#ffd03a" stroke="#0a0f1c" stroke-width="2"/>
+    </g>
+  </g>
 </svg>

@@ -1,21 +1,25 @@
 // Pedal Hidrográfico — service worker
 //
-// Two cache buckets:
+// Two cache buckets, both stale-while-revalidate:
 //   STATIC_CACHE  — app shell (HTML/CSS/JS/icons/routes.json/manifest).
-//                    Cache-first; falls back to network.
-//   RUNTIME_CACHE — map tiles, OSRM, elevation, Instagram embed, etc.
-//                    Stale-while-revalidate so cached tiles render instantly
-//                    and refresh in the background.
+//                    Cached copy serves instantly; a network fetch runs in
+//                    the background and updates the cache for the *next*
+//                    page load. So redeploys propagate without users having
+//                    to hard-refresh — they just get the new version on
+//                    their second visit.
+//   RUNTIME_CACHE — map tiles, OSRM, elevation, etc. Same strategy.
 
-const VERSION = 'phidro-v1';
+const VERSION = 'phidro-v2';
 const STATIC_CACHE = `${VERSION}-static`;
 const RUNTIME_CACHE = `${VERSION}-runtime`;
 
+// Pre-cache only the entry HTML and small steady assets. app.js and
+// style.css carry a deploy-time `?v=<ts>` query string, so pre-caching them
+// here under the un-versioned URL would just waste a fetch — they get
+// cached on first real load via the stale-while-revalidate path.
 const STATIC_ASSETS = [
   './',
   './index.html',
-  './app.js',
-  './style.css',
   './routes.json',
   './manifest.json',
   './icon.svg',
@@ -70,45 +74,32 @@ self.addEventListener('fetch', (event) => {
 
   const url = new URL(req.url);
 
-  // Same-origin app shell + routes.json: cache-first.
+  // Same-origin app shell + routes.json: stale-while-revalidate so redeploys
+  // surface on the next reload without a hard-refresh dance.
   if (url.origin === self.location.origin) {
-    event.respondWith(cacheFirst(req));
+    event.respondWith(staleWhileRevalidate(req, STATIC_CACHE));
     return;
   }
 
   // Allowlisted third-party hosts: stale-while-revalidate.
   if (RUNTIME_HOSTS.some((re) => re.test(url.host))) {
-    event.respondWith(staleWhileRevalidate(req));
+    event.respondWith(staleWhileRevalidate(req, RUNTIME_CACHE));
     return;
   }
 
   // Everything else: pass through.
 });
 
-async function cacheFirst(req) {
-  const cache = await caches.open(STATIC_CACHE);
-  const cached = await cache.match(req);
-  if (cached) return cached;
-  try {
-    const res = await fetch(req);
-    if (res.ok) cache.put(req, res.clone());
-    return res;
-  } catch (err) {
-    return cached || Response.error();
-  }
-}
-
-async function staleWhileRevalidate(req) {
-  const cache = await caches.open(RUNTIME_CACHE);
+async function staleWhileRevalidate(req, cacheName) {
+  const cache = await caches.open(cacheName);
   const cached = await cache.match(req);
   const fetchPromise = fetch(req)
     .then((res) => {
       // Only cache successful, non-opaque responses to avoid filling cache
-      // with failed/redirect garbage. Tile servers return 200 OK with image
-      // bodies; OSRM/elevation return 200 OK with JSON.
+      // with failed/redirect garbage.
       if (res && res.ok) cache.put(req, res.clone());
       return res;
     })
-    .catch(() => cached);
+    .catch(() => cached || Response.error());
   return cached || fetchPromise;
 }

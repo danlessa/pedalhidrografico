@@ -36,7 +36,7 @@
       <input type="file" id="edit-gpx-input" accept=".gpx,application/gpx+xml" hidden />
       <button id="edit-gpx-btn" type="button" class="secondary-btn" title="Carregar um arquivo .gpx para editar">Editar GPX…</button>
       <button id="trace-btn" type="button" class="primary-btn">Traçar GPX</button>
-      <button id="menu-btn" type="button" class="menu-btn" title="Mostrar rotas" aria-label="Mostrar rotas">≡</button>
+      <button id="menu-btn" type="button" class="menu-btn secondary-btn" title="Mostrar rotas">Rotas</button>
     </header>
 
     <main id="map">
@@ -218,6 +218,9 @@
     </div>
 
     <div id="toast" class="toast" hidden></div>
+
+    <!-- Floating tooltip shown when hovering a route in the sidebar -->
+    <div id="route-tooltip" class="route-tooltip" hidden></div>
 
     <script
       src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
