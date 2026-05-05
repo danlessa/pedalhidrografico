@@ -1,0 +1,16 @@
+{
+  "name": "pedalhidrografico",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Static map viewer for Pedal Hidrográfico routes, plus a build script that pre-bakes routes from RideWithGPS into routes.json.",
+  "type": "module",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "build:routes": "node scripts/build-routes.mjs"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5"
+  }
+}

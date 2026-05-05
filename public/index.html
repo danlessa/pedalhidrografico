@@ -1,0 +1,230 @@
+<!doctype html>
+<html lang="pt-br">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#0f1721" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Pedal Hidrográfico" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <link rel="manifest" href="manifest.json" />
+    <link rel="icon" href="icon.svg" type="image/svg+xml" />
+    <link rel="icon" href="icon-192.png" sizes="192x192" type="image/png" />
+    <link rel="apple-touch-icon" href="apple-touch-icon.png" />
+    <title>Ajudante cartográfica-energética para passeios topo hidrográficos na Grande São Paulo</title>
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+      crossorigin=""
+    />
+    <link
+      rel="stylesheet"
+      href="https://cdn.jsdelivr.net/npm/leaflet.locatecontrol@0.83.1/dist/L.Control.Locate.min.css"
+    />
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body class="rotas-page">
+    <header class="topbar">
+      <div class="title">
+        <h1>Ajudante cartográfica-energética para passeios topo hidrográficos na Grande São Paulo</h1>
+        <span class="credit">feito por Cláudio · pedido e dirigido pelos neogeógrafos hidrográficos</span>
+      </div>
+      <button id="layers-btn" type="button" class="secondary-btn" title="Mostrar/ocultar camadas" aria-pressed="true">Camadas</button>
+      <button id="help-btn" type="button" class="secondary-btn" title="Como usar">Instruções</button>
+      <input type="file" id="edit-gpx-input" accept=".gpx,application/gpx+xml" hidden />
+      <button id="edit-gpx-btn" type="button" class="secondary-btn" title="Carregar um arquivo .gpx para editar">Editar GPX…</button>
+      <button id="trace-btn" type="button" class="primary-btn">Traçar GPX</button>
+      <button id="menu-btn" type="button" class="menu-btn" title="Mostrar rotas" aria-label="Mostrar rotas">≡</button>
+    </header>
+
+    <main id="map">
+      <div id="trace-controls" class="trace-controls" hidden>
+        <button type="button" id="trace-undo" disabled title="Desfazer (Cmd/Ctrl+Z)">↶ Undo</button>
+        <button type="button" id="trace-redo" disabled title="Refazer (Cmd/Ctrl+Shift+Z)">↷ Redo</button>
+        <label class="trace-toggle" title="Como conectar pontos consecutivos">
+          <span>Rota</span>
+          <select id="trace-routing-mode">
+            <option value="straight">Reta (menor distância)</option>
+            <option value="cycling">OSM ciclismo</option>
+            <option value="foot">OSM a pé</option>
+          </select>
+        </label>
+        <button type="button" id="params-btn" class="params-btn" title="Parâmetros da simulação">⚙ Parâmetros</button>
+        <span class="trace-count" id="trace-count">0 pontos</span>
+        <span class="trace-metrics" id="trace-metrics">0,00 km · 0,0 kJ</span>
+        <button type="button" id="trace-cancel" class="trace-cancel">Cancelar</button>
+      </div>
+    </main>
+
+    <aside id="sidebar" class="sidebar">
+      <h2>Routes</h2>
+      <div id="routes-status" class="status">Loading…</div>
+
+      <section class="date-filter" id="date-filter" hidden>
+        <div class="date-filter-header">
+          <span>Date filter</span>
+          <button type="button" id="date-reset" class="linkbtn">reset</button>
+        </div>
+        <label class="range-row">
+          <span class="range-label">From</span>
+          <input type="range" id="range-from" />
+          <span class="range-value" id="range-from-value"></span>
+        </label>
+        <label class="range-row">
+          <span class="range-label">To</span>
+          <input type="range" id="range-to" />
+          <span class="range-value" id="range-to-value"></span>
+        </label>
+      </section>
+
+      <ul id="routes-list"></ul>
+    </aside>
+
+    <!-- Instruções modal -->
+    <div id="help-modal" class="modal" hidden>
+      <div class="modal-content help-modal-content">
+        <header>
+          <h2>Instruções</h2>
+          <button class="close" id="help-close" type="button" aria-label="Close">&times;</button>
+        </header>
+        <div class="help-body">
+          <h3>Mapa</h3>
+          <p>Arraste para mover, scroll/pinça para zoom. O painel de camadas (canto sup. direito) controla visibilidade e opacidade de cada camada — base (OSM ou satélite), sobreposições (Topografia colorida, SARA Brasil 1930, rotas da planilha) e duas camadas customizáveis (XYZ e WMS — clique no ✎ para colar uma URL).</p>
+
+          <h3>Rotas da planilha</h3>
+          <p>A barra lateral lista as rotas em ordem decrescente de data. Use o filtro de data para mostrar só as rotas dentro de uma janela. Clique numa rota para abrir o post do Instagram + atalho para abrir no RideWithGPS, ou para entrar no editor (<em>Editar este traçado</em>) com aquela rota carregada.</p>
+
+          <h3>Editar um GPX existente</h3>
+          <p><strong>Editar GPX…</strong> abre um <code>.gpx</code> local no editor. Se for um arquivo gerado por este app, parâmetros de simulação e waypoints originais voltam exatamente como estavam.</p>
+
+          <h3>Traçar um GPX novo</h3>
+          <ul>
+            <li><strong>Traçar GPX</strong> abre o modo de edição: clique no mapa para adicionar pontos, arraste-os para mover.</li>
+            <li><strong>Rota</strong> escolhe como conectar pontos consecutivos: <em>Reta</em> (linha entre pontos, menor distância) ou <em>OSM ciclismo / a pé</em> (rota via OpenStreetMap).</li>
+            <li><strong>Undo / Redo</strong> (também ⌘/Ctrl+Z e ⌘/Ctrl+Shift+Z), <strong>Cancelar</strong> (Esc).</li>
+            <li><strong>Salvar GPX</strong> pede um nome e baixa o arquivo. O <code>.gpx</code> inclui os parâmetros de simulação e a lista de waypoints como extensões — invisíveis para Garmin/Strava/RWGPS, mas usados ao reabrir aqui.</li>
+          </ul>
+
+          <h3>POIs / cues</h3>
+          <p>Clique em um ponto da edição → popup permite renomear, marcar como POI e escolher um símbolo Garmin. POIs viram <code>&lt;wpt&gt;</code> no GPX e aparecem como pinos no Edge.</p>
+
+          <h3>Simulação de energia</h3>
+          <p>O cabeçalho do editor mostra distância, altimetria (↑/↓), tempo de movimento + tempo total, velocidade média e energia gasta pelo ciclista (kJ). Clique em <strong>⚙ Parâmetros</strong> para ajustar massa, Crr, CdA, ρ, potência por terreno (subida / plano / descida), ε (recuperação em descida), eficiência de movimento e limiar de plano. Os parâmetros podem ser salvos / carregados como JSON-LD com vocabulário QUDT (RDF).</p>
+
+          <h3>Limitações conhecidas</h3>
+          <ul>
+            <li>O embed do Instagram não mostra comentários (limitação do próprio IG).</li>
+            <li>Roteamento usa o servidor público do OSRM, com limite de requisições. Pode falhar — nesse caso o segmento vira linha reta.</li>
+            <li>A elevação vem do Open-Meteo, com cache local. Pontos sem elevação são tratados como plano.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <!-- Save GPX: ask the user for a route name -->
+    <div id="save-modal" class="modal" hidden>
+      <div class="modal-content save-modal-content">
+        <header>
+          <h2>Salvar GPX</h2>
+          <button class="close" id="save-close" type="button" aria-label="Close">&times;</button>
+        </header>
+        <div class="save-body">
+          <label class="save-row">
+            <span>Nome da rota</span>
+            <input type="text" id="save-name" maxlength="120" />
+          </label>
+          <p class="muted">O arquivo será salvo como <code id="save-filename-preview">tracado.gpx</code>.</p>
+          <div class="save-actions">
+            <button type="button" id="save-cancel">Cancelar</button>
+            <button type="button" id="save-confirm" class="primary-btn">Salvar GPX</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Simulation parameters modal -->
+    <div id="params-modal" class="modal" hidden>
+      <div class="modal-content params-modal-content">
+        <header>
+          <h2>Parâmetros da simulação</h2>
+          <button class="close" id="params-close" type="button" aria-label="Close">&times;</button>
+        </header>
+        <div class="params-body">
+          <p class="muted">A velocidade é simulada por segmento a partir destes valores. A potência do ciclista varia por terreno (subida / plano / descida — o limiar é configurável abaixo). Em descidas o ciclista recupera apenas <em>ε</em>% da energia gravitacional como velocidade. O tempo total é o tempo de movimento dividido pela <em>eficiência de movimento</em> (paradas, semáforos, fotos).</p>
+          <label class="param-row">
+            <span class="param-label">Massa total (rider + bike)</span>
+            <span class="param-input"><input type="number" id="param-mass" step="0.5" min="20" max="200"> kg</span>
+          </label>
+          <label class="param-row">
+            <span class="param-label">Coef. de rolamento (Crr)</span>
+            <span class="param-input"><input type="number" id="param-crr" step="0.001" min="0.001" max="0.05"></span>
+          </label>
+          <label class="param-row">
+            <span class="param-label">Área de arrasto (CdA)</span>
+            <span class="param-input"><input type="number" id="param-cda" step="0.05" min="0.1" max="1.5"> m²</span>
+          </label>
+          <label class="param-row">
+            <span class="param-label">Densidade do ar (ρ)</span>
+            <span class="param-input"><input type="number" id="param-rho" step="0.025" min="0.5" max="1.5"> kg/m³</span>
+          </label>
+          <label class="param-row">
+            <span class="param-label">Potência em subida (&gt; +1%)</span>
+            <span class="param-input"><input type="number" id="param-power-ascent" step="5" min="0" max="600"> W</span>
+          </label>
+          <label class="param-row">
+            <span class="param-label">Potência em plano (±1%)</span>
+            <span class="param-input"><input type="number" id="param-power-flat" step="5" min="0" max="600"> W</span>
+          </label>
+          <label class="param-row">
+            <span class="param-label">Potência em descida (&lt; −1%)</span>
+            <span class="param-input"><input type="number" id="param-power-descent" step="5" min="0" max="600"> W</span>
+          </label>
+          <label class="param-row">
+            <span class="param-label">Eficiência descida (ε)</span>
+            <span class="param-input"><input type="number" id="param-epsilon" step="1" min="0" max="100"> %</span>
+          </label>
+          <label class="param-row">
+            <span class="param-label">Eficiência de movimento</span>
+            <span class="param-input"><input type="number" id="param-efficiency" step="1" min="10" max="100"> %</span>
+          </label>
+          <label class="param-row">
+            <span class="param-label">Limiar de plano (±)</span>
+            <span class="param-input"><input type="number" id="param-slope-threshold" step="0.1" min="0" max="20"> %</span>
+          </label>
+          <div class="params-actions">
+            <input type="file" id="params-import" accept="application/ld+json,application/json,.json,.jsonld" hidden />
+            <button type="button" id="params-load">Carregar de arquivo…</button>
+            <button type="button" id="params-export">Salvar em arquivo</button>
+            <button type="button" id="params-reset" class="linkbtn">Restaurar padrões</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Route detail modal (embeds Instagram post when available) -->
+    <div id="route-modal" class="modal" hidden>
+      <div class="modal-content route-modal-content">
+        <header>
+          <h2 id="route-modal-title">Route</h2>
+          <button class="close" id="route-modal-close" type="button" aria-label="Close">&times;</button>
+        </header>
+        <div class="route-modal-body">
+          <div class="route-modal-meta" id="route-modal-meta"></div>
+          <div class="route-modal-ig" id="route-modal-ig"></div>
+        </div>
+      </div>
+    </div>
+
+    <div id="toast" class="toast" hidden></div>
+
+    <script
+      src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+      integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+      crossorigin=""
+    ></script>
+    <script src="https://cdn.jsdelivr.net/npm/leaflet.locatecontrol@0.83.1/dist/L.Control.Locate.min.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>

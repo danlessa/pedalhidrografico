@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="96" ry="96" fill="#0f1721"/>
+  <path d="M -20 380 Q 96 340 200 380 T 420 380 T 540 380 L 540 540 L -20 540 Z" fill="#2da9ff" opacity="0.35"/>
+  <path d="M -20 420 Q 96 380 200 420 T 420 420 T 540 420 L 540 540 L -20 540 Z" fill="#2da9ff" opacity="0.55"/>
+  <path d="M -20 460 Q 96 420 200 460 T 420 460 T 540 460 L 540 540 L -20 540 Z" fill="#2da9ff" opacity="0.85"/>
+  <text x="256" y="280" text-anchor="middle"
+        font-family="Helvetica, Arial, sans-serif"
+        font-weight="800" font-size="220" fill="#fff"
+        letter-spacing="-6">PH</text>
+</svg>
