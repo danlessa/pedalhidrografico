@@ -123,6 +123,29 @@
       </div>
     </div>
 
+    <!-- QR-code modal: scannable image of the sharable link -->
+    <div id="qr-modal" class="modal" hidden>
+      <div class="modal-content qr-modal-content">
+        <header>
+          <h2>QR code do link</h2>
+          <button class="close" id="qr-close" type="button" aria-label="Close">&times;</button>
+        </header>
+        <div class="qr-body">
+          <div class="qr-image" id="qr-image"></div>
+          <p class="muted" id="qr-warning" hidden></p>
+          <label class="qr-url-row">
+            <span>URL</span>
+            <input type="text" id="qr-url" readonly />
+          </label>
+          <div class="qr-actions">
+            <button type="button" id="qr-copy">Copiar URL</button>
+            <button type="button" id="qr-download-svg">Baixar SVG</button>
+            <button type="button" id="qr-download-png">Baixar PNG</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- Save GPX: ask the user for a route name -->
     <div id="save-modal" class="modal" hidden>
       <div class="modal-content save-modal-content">
@@ -138,6 +161,8 @@
           <p class="muted">O arquivo será salvo como <code id="save-filename-preview">tracado.gpx</code>.</p>
           <div class="save-actions">
             <button type="button" id="save-cancel">Cancelar</button>
+            <button type="button" id="save-copy-link">Copiar link</button>
+            <button type="button" id="save-qr">QR</button>
             <button type="button" id="save-confirm" class="primary-btn">Salvar GPX</button>
           </div>
         </div>
@@ -228,6 +253,7 @@
       crossorigin=""
     ></script>
     <script src="https://cdn.jsdelivr.net/npm/leaflet.locatecontrol@0.83.1/dist/L.Control.Locate.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js"></script>
     <script src="app.js"></script>
   </body>
 </html>

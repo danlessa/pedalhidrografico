@@ -72,6 +72,16 @@ const OVERLAY_LAYERS = [
     hide: () => setRoutesGloballyVisible(false),
     setOpacity: (frac) => applyRoutesOpacity(frac * 100),
   },
+  // Live OSM hydrography + ridges via Overpass. Re-queries on pan/zoom.
+  {
+    id: 'osm-overpass',
+    label: 'Mapa de morros e águas OSM',
+    defaultVisible: false,
+    defaultPct: 100,
+    show: () => showOverpass(),
+    hide: () => hideOverpass(),
+    setOpacity: (frac) => setOverpassOpacity(frac),
+  },
   // User-defined tile sources. The URL is prompted on demand and persisted
   // in localStorage so the layer is restored on reload.
   {
@@ -97,6 +107,142 @@ const OVERLAY_LAYERS = [
     edit: () => promptCustomWmsConfig(),
   },
 ];
+
+// ─── Overpass (OSM live) overlay ─────────────────────────────────────────────
+// Live-queries the OSM Overpass API for waterways and ridges in the current
+// viewport. Re-runs on pan/zoom (debounced). Hover any feature to see its
+// name + type in a tooltip. Style mirrors the user's JOSM "Morros e Águas"
+// stylesheet:
+//   waterway=river                green  #A6C045 w5  (dashed if tunnel)
+//   waterway=stream/canal/etc     ochre  #DDB84F w3  (dashed if tunnel)
+//   natural=ridge                 orange #EF7A30 w3
+const OVERPASS_URL = 'https://overpass-api.de/api/interpreter';
+const OVERPASS_MIN_ZOOM = 13;
+const overpassLayers = [];
+let overpassActive = false;
+let overpassOpacity = 1;
+let overpassDebounce = null;
+let overpassFetchSeq = 0;
+
+async function queryOverpass(b) {
+  const q = `[out:json][timeout:60];
+(
+  way["waterway"](${b.south},${b.west},${b.north},${b.east});
+  way["natural"="ridge"](${b.south},${b.west},${b.north},${b.east});
+);
+out body;
+>;
+out skel qt;`;
+  const res = await fetch(OVERPASS_URL, {
+    method: 'POST',
+    body: 'data=' + encodeURIComponent(q),
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+  });
+  if (!res.ok) throw new Error(`Overpass ${res.status}`);
+  return res.json();
+}
+
+function styleForOverpassWay(tags) {
+  const tunnel = !!tags.tunnel;
+  if (tags.natural === 'ridge') {
+    return { color: '#EF7A30', weight: 3, opacity: overpassOpacity };
+  }
+  if (tags.waterway === 'river') {
+    return {
+      color: '#A6C045',
+      weight: 5,
+      opacity: overpassOpacity,
+      dashArray: tunnel ? '4 6' : null,
+    };
+  }
+  if (tags.waterway) {
+    return {
+      color: '#DDB84F',
+      weight: 3,
+      opacity: overpassOpacity,
+      dashArray: tunnel ? '4 4' : null,
+    };
+  }
+  return { color: '#888', weight: 2, opacity: overpassOpacity };
+}
+
+function clearOverpassLayers() {
+  for (const l of overpassLayers) map.removeLayer(l);
+  overpassLayers.length = 0;
+}
+
+function renderOverpass(data) {
+  clearOverpassLayers();
+  const nodes = new Map();
+  for (const el of data.elements || []) {
+    if (el.type === 'node') nodes.set(el.id, [el.lat, el.lon]);
+  }
+  for (const el of data.elements || []) {
+    if (el.type !== 'way') continue;
+    const latlngs = (el.nodes || []).map((id) => nodes.get(id)).filter(Boolean);
+    if (latlngs.length < 2) continue;
+    const tags = el.tags || {};
+    const layer = L.polyline(latlngs, styleForOverpassWay(tags));
+    const labelParts = [];
+    if (tags.name) labelParts.push(`<strong>${escapeHtml(tags.name)}</strong>`);
+    const kind = tags.waterway || tags.natural || '';
+    if (kind) labelParts.push(`<em>${escapeHtml(kind)}</em>`);
+    if (tags.tunnel) labelParts.push('(túnel)');
+    const html = labelParts.join(' · ') || 'OSM';
+    layer.bindTooltip(html, { sticky: true, className: 'osm-tip' });
+    layer.addTo(map);
+    overpassLayers.push(layer);
+  }
+}
+
+async function refreshOverpass() {
+  if (!overpassActive) return;
+  if (map.getZoom() < OVERPASS_MIN_ZOOM) {
+    clearOverpassLayers();
+    showToast(`Aproxime o mapa (zoom ≥ ${OVERPASS_MIN_ZOOM}) para buscar OSM`);
+    return;
+  }
+  const b = map.getBounds();
+  const bbox = {
+    south: b.getSouth().toFixed(6),
+    west: b.getWest().toFixed(6),
+    north: b.getNorth().toFixed(6),
+    east: b.getEast().toFixed(6),
+  };
+  const seq = ++overpassFetchSeq;
+  showToast('Buscando hidrografia OSM…', 1500);
+  try {
+    const data = await queryOverpass(bbox);
+    if (seq !== overpassFetchSeq || !overpassActive) return;
+    renderOverpass(data);
+    showToast(`OSM: ${overpassLayers.length} feições`, 1800);
+  } catch (err) {
+    if (seq !== overpassFetchSeq) return;
+    console.warn('Overpass failed:', err);
+    showToast(`Falha Overpass: ${err.message}`);
+  }
+}
+
+function onOverpassMoveEnd() {
+  clearTimeout(overpassDebounce);
+  overpassDebounce = setTimeout(refreshOverpass, 700);
+}
+
+function showOverpass() {
+  overpassActive = true;
+  map.on('moveend', onOverpassMoveEnd);
+  refreshOverpass();
+}
+function hideOverpass() {
+  overpassActive = false;
+  map.off('moveend', onOverpassMoveEnd);
+  clearTimeout(overpassDebounce);
+  clearOverpassLayers();
+}
+function setOverpassOpacity(frac) {
+  overpassOpacity = frac;
+  for (const l of overpassLayers) l.setStyle({ opacity: frac });
+}
 
 // ─── Custom XYZ / WMS layers ─────────────────────────────────────────────────
 let customXyzUrl = localStorage.getItem('phidro:customXyz') || '';
@@ -418,11 +564,18 @@ if ('serviceWorker' in navigator) {
 }
 
 // ─── Boot ────────────────────────────────────────────────────────────────────
-boot().catch((err) => {
-  console.error(err);
-  routesStatus.classList.add('error');
-  routesStatus.textContent = `Failed: ${err.message}`;
-});
+boot()
+  .catch((err) => {
+    console.error(err);
+    routesStatus.classList.add('error');
+    routesStatus.textContent = `Failed: ${err.message}`;
+  })
+  .finally(() => {
+    // After the page is ready, decode any #st=... shared route from the URL.
+    tryLoadFromShareHash().catch((err) =>
+      console.warn('[share] hash load failed:', err),
+    );
+  });
 
 async function boot() {
   routesStatus.textContent = 'Loading routes.json…';
@@ -965,6 +1118,7 @@ let trackpoints = [];
 let history = [[]];          // snapshots of [{ lat, lng, pathFromPrev }, ...]
 let historyIndex = 0;
 let draftPolyline = null;
+let draftCasing = null;
 let pointIdCounter = 0;
 // 'straight' | 'cycling' | 'foot' — controls how new segments are computed.
 // 'straight' just connects waypoints with a line (the absolute shortest distance).
@@ -1020,13 +1174,14 @@ function enterDrawingMode() {
   trackpoints = [];
   history = [[]];
   historyIndex = 0;
-  if (draftPolyline) {
-    map.removeLayer(draftPolyline);
-    draftPolyline = null;
-  }
+  if (draftPolyline) { map.removeLayer(draftPolyline); draftPolyline = null; }
+  if (draftCasing)   { map.removeLayer(draftCasing);   draftCasing = null; }
 
   routingMode = traceRoutingMode.value || 'straight';
   map.on('click', onMapClickInDrawing);
+  // Map's default double-click-to-zoom would compete with our "dbl-click line
+  // to add a waypoint" gesture, so suspend it for the duration of drawing.
+  map.doubleClickZoom.disable();
   traceBtn.textContent = 'Salvar GPX';
   traceControls.hidden = false;
   updateTraceControls();
@@ -1039,10 +1194,8 @@ function exitDrawingMode() {
 
   for (const t of trackpoints) map.removeLayer(t.marker);
   trackpoints = [];
-  if (draftPolyline) {
-    map.removeLayer(draftPolyline);
-    draftPolyline = null;
-  }
+  if (draftPolyline) { map.removeLayer(draftPolyline); draftPolyline = null; }
+  if (draftCasing)   { map.removeLayer(draftCasing);   draftCasing = null; }
   history = [[]];
   historyIndex = 0;
 
@@ -1068,6 +1221,7 @@ function exitDrawingMode() {
   applyRoutesOpacity(routesOpacityPct);
 
   map.off('click', onMapClickInDrawing);
+  map.doubleClickZoom.enable();
   traceBtn.textContent = 'Traçar GPX';
   traceControls.hidden = true;
   defaultSaveName = '';
@@ -1465,24 +1619,116 @@ function redrawAndMetrics() {
 function updateDraftPolyline() {
   const latlngs = assembleLatLngs();
   if (latlngs.length === 0) {
-    if (draftPolyline) {
-      map.removeLayer(draftPolyline);
-      draftPolyline = null;
-    }
+    if (draftPolyline) { map.removeLayer(draftPolyline); draftPolyline = null; }
+    if (draftCasing)   { map.removeLayer(draftCasing);   draftCasing = null; }
     return;
   }
+  // White line over a dark casing so the trace stays readable on top of any
+  // base layer — same scheme as the rendered sidebar routes, for visual
+  // consistency between the in-progress draft and the saved result.
   if (!draftPolyline) {
-    draftPolyline = L.polyline(latlngs, {
-      color: '#2da9ff',
-      weight: 4,
-      opacity: 0.95,
-      dashArray: '6 6',
+    draftCasing = L.polyline(latlngs, {
+      color: '#1a1a1a',
+      weight: 7,
+      opacity: 0.55,
       lineCap: 'round',
       lineJoin: 'round',
     }).addTo(map);
+    draftPolyline = L.polyline(latlngs, {
+      color: '#ffffff',
+      weight: 3.5,
+      opacity: 1,
+      lineCap: 'round',
+      lineJoin: 'round',
+    }).addTo(map);
+    // Double-clicking on the line inserts a new waypoint between the two
+    // user waypoints whose segment was clicked. Bound on both casing and
+    // top stroke since either may capture the event.
+    draftPolyline.on('dblclick', onLineDblClick);
+    draftCasing.on('dblclick', onLineDblClick);
   } else {
+    if (draftCasing) draftCasing.setLatLngs(latlngs);
     draftPolyline.setLatLngs(latlngs);
   }
+}
+
+// ─── Double-click on the draft line → insert intermediate POI waypoint ──────
+function onLineDblClick(e) {
+  L.DomEvent.stop(e);
+  if (!drawingMode || trackpoints.length < 2) return;
+  const idx = findInsertIndex(e.latlng);
+  insertWaypointAt(idx, e.latlng);
+}
+
+// Find the index where a new waypoint should be inserted: between the two
+// consecutive user waypoints whose great-circle segment is closest to the
+// click location. Uses a simple flat-Earth approximation — fine at the
+// scales the editor works at.
+function findInsertIndex(latlng) {
+  let bestIdx = trackpoints.length;
+  let bestDist = Infinity;
+  for (let i = 0; i < trackpoints.length - 1; i++) {
+    const a = trackpoints[i].marker.getLatLng();
+    const b = trackpoints[i + 1].marker.getLatLng();
+    const d = pointToSegmentDistance(latlng, a, b);
+    if (d < bestDist) {
+      bestDist = d;
+      bestIdx = i + 1;
+    }
+  }
+  return bestIdx;
+}
+
+function pointToSegmentDistance(p, a, b) {
+  const dx = b.lng - a.lng;
+  const dy = b.lat - a.lat;
+  const lenSq = dx * dx + dy * dy;
+  if (lenSq === 0) {
+    const ddx = p.lng - a.lng, ddy = p.lat - a.lat;
+    return Math.sqrt(ddx * ddx + ddy * ddy);
+  }
+  const t = Math.max(
+    0,
+    Math.min(1, ((p.lng - a.lng) * dx + (p.lat - a.lat) * dy) / lenSq),
+  );
+  const cx = a.lng + t * dx;
+  const cy = a.lat + t * dy;
+  return Math.hypot(p.lng - cx, p.lat - cy);
+}
+
+async function insertWaypointAt(idx, latlng) {
+  // Plain trackpoint by default — same as a click-to-add. The user can
+  // toggle the POI flag in the marker popup if they want.
+  const tp = createTrackpoint(latlng);
+  trackpoints.splice(idx, 0, tp);
+
+  // Wire pathFromPrev for the inserted waypoint, then rebuild the next one's
+  // path (since its previous waypoint is now the inserted one, not its old
+  // neighbor).
+  if (idx > 0) {
+    tp.pathFromPrev = straightPath(
+      trackpoints[idx - 1].marker.getLatLng(),
+      tp.marker.getLatLng(),
+    );
+  } else {
+    tp.pathFromPrev = null;
+  }
+  if (idx + 1 < trackpoints.length) {
+    const next = trackpoints[idx + 1];
+    next.pathFromPrev = straightPath(
+      tp.marker.getLatLng(),
+      next.marker.getLatLng(),
+    );
+  }
+  redrawAndMetrics();
+  updateTraceControls();
+
+  if (routingMode !== 'straight') {
+    if (idx > 0) await refetchPath(idx);
+    if (idx + 1 < trackpoints.length) await refetchPath(idx + 1);
+    redrawAndMetrics();
+  }
+  pushHistory();
 }
 
 function totalDistanceMeters() {
@@ -2040,6 +2286,123 @@ function filenameFromName(name, ts) {
 // Strava, RWGPS) will silently ignore unknown namespaces per the GPX spec.
 const PHIDRO_NS = 'https://pedalhidrografi.co/ns/gpx/1.0';
 
+// ─── Sharable-URL state (gzipped JSON in the hash fragment) ──────────────────
+// Encodes the current trackpoints + routing mode into a tiny URL that, when
+// opened, repopulates the editor with the same draft. Hash fragment so it
+// stays client-side (no server logs, no CDN caching).
+const SHARE_STATE_VERSION = 1;
+
+function snapshotForShare(name) {
+  return {
+    v: SHARE_STATE_VERSION,
+    rm: routingMode,
+    n: name || '',
+    wp: trackpoints.map((t) => {
+      const ll = t.marker.getLatLng();
+      const lat = +ll.lat.toFixed(5);
+      const lng = +ll.lng.toFixed(5);
+      const out = [lat, lng];
+      // Append name/POI/sym only if non-default to keep the payload small.
+      if (t.name || t.isPoi) {
+        out.push(t.name || '');
+        out.push(t.isPoi ? 1 : 0);
+        if (t.isPoi && t.sym && t.sym !== 'Flag, Blue') out.push(t.sym);
+      }
+      return out;
+    }),
+  };
+}
+
+async function gzipB64Url(text) {
+  const stream = new Blob([text]).stream().pipeThrough(new CompressionStream('gzip'));
+  const buf = new Uint8Array(await new Response(stream).arrayBuffer());
+  let bin = '';
+  // String.fromCharCode in chunks to avoid call-stack overflow on large arrays.
+  const CHUNK = 0x8000;
+  for (let i = 0; i < buf.length; i += CHUNK) {
+    bin += String.fromCharCode.apply(null, buf.subarray(i, i + CHUNK));
+  }
+  return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+async function gzipB64UrlDecode(b64url) {
+  const b64 = b64url.replace(/-/g, '+').replace(/_/g, '/');
+  const padded = b64 + '='.repeat((4 - (b64.length % 4)) % 4);
+  const bin = atob(padded);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'));
+  return new Response(stream).text();
+}
+
+async function buildShareUrl(name) {
+  const state = snapshotForShare(name);
+  const json = JSON.stringify(state);
+  const compressed = await gzipB64Url(json);
+  const base = location.href.split('#')[0];
+  return `${base}#st=${compressed}`;
+}
+
+async function tryLoadFromShareHash() {
+  if (!('CompressionStream' in window)) return false;
+  const hashParams = new URLSearchParams(location.hash.replace(/^#/, ''));
+  const encoded = hashParams.get('st');
+  if (!encoded) return false;
+
+  try {
+    const json = await gzipB64UrlDecode(encoded);
+    const state = JSON.parse(json);
+    if (!state || !Array.isArray(state.wp) || state.wp.length === 0) return false;
+
+    if (!drawingMode) enterDrawingMode();
+    for (const t of trackpoints) map.removeLayer(t.marker);
+    trackpoints = [];
+    pendingRouteSeq++;
+
+    if (state.rm && ['straight', 'cycling', 'foot'].includes(state.rm)) {
+      routingMode = state.rm;
+      traceRoutingMode.value = state.rm;
+    }
+
+    for (let i = 0; i < state.wp.length; i++) {
+      const wp = state.wp[i];
+      const [lat, lng, name = '', isPoi = 0, sym] = wp;
+      const tp = createTrackpoint(L.latLng(lat, lng), {
+        name: name || '',
+        isPoi: !!isPoi,
+        sym: sym || (isPoi ? 'Flag, Blue' : 'Flag, Blue'),
+      });
+      if (i > 0) {
+        tp.pathFromPrev = straightPath(
+          trackpoints[i - 1].marker.getLatLng(),
+          tp.marker.getLatLng(),
+        );
+      }
+      trackpoints.push(tp);
+    }
+
+    if (state.n) defaultSaveName = state.n;
+    redrawAndMetrics();
+    updateTraceControls();
+
+    const bounds = L.latLngBounds(trackpoints.map((t) => t.marker.getLatLng()));
+    if (bounds.isValid()) map.fitBounds(bounds, { padding: [40, 40] });
+
+    if (routingMode !== 'straight') {
+      for (let i = 1; i < trackpoints.length; i++) await refetchPath(i);
+      redrawAndMetrics();
+    }
+    pushHistory();
+
+    showToast(`Link compartilhado carregado · ${trackpoints.length} pontos`);
+    return true;
+  } catch (err) {
+    console.warn('Share hash decode failed:', err);
+    showToast(`Link inválido: ${err.message}`);
+    return false;
+  }
+}
+
 function buildGpx(latlngs, name, pois = [], extras = {}) {
   const isoNow = new Date().toISOString();
   const wpts = pois
@@ -2134,6 +2497,169 @@ saveNameInput.addEventListener('keydown', (e) => {
 });
 saveConfirm.addEventListener('click', doSave);
 
+// "Copiar link" / "QR" — encode current trackpoints into a sharable URL.
+const saveCopyLink = document.getElementById('save-copy-link');
+const saveQrBtn = document.getElementById('save-qr');
+
+async function currentShareUrl() {
+  if (!('CompressionStream' in window)) {
+    alert('Seu navegador não suporta o link compartilhável (precisa de CompressionStream).');
+    return null;
+  }
+  if (trackpoints.length < 2) {
+    alert('Adicione pelo menos 2 pontos antes de gerar o link.');
+    return null;
+  }
+  return buildShareUrl(saveNameInput.value.trim());
+}
+
+saveCopyLink?.addEventListener('click', async () => {
+  if (!('CompressionStream' in window)) {
+    alert('Seu navegador não suporta o link compartilhável (precisa de CompressionStream).');
+    return;
+  }
+  if (trackpoints.length < 2) {
+    alert('Adicione pelo menos 2 pontos antes de gerar o link.');
+    return;
+  }
+  try {
+    const url = await currentShareUrl();
+    if (!url) return;
+    if (navigator.clipboard) {
+      await navigator.clipboard.writeText(url);
+      showToast(`Link copiado · ${url.length} caracteres`);
+    } else {
+      // Fallback: prompt window with the URL pre-selected for manual copy.
+      window.prompt('Copie o link:', url);
+    }
+  } catch (err) {
+    alert(`Falha ao gerar link: ${err.message}`);
+  }
+});
+
+// ─── QR-code modal ───────────────────────────────────────────────────────────
+const qrModal = document.getElementById('qr-modal');
+const qrClose = document.getElementById('qr-close');
+const qrImage = document.getElementById('qr-image');
+const qrWarning = document.getElementById('qr-warning');
+const qrUrlInput = document.getElementById('qr-url');
+const qrCopyBtn = document.getElementById('qr-copy');
+const qrDownloadSvgBtn = document.getElementById('qr-download-svg');
+const qrDownloadPngBtn = document.getElementById('qr-download-png');
+
+let qrCurrentSvg = null;
+let qrCurrentUrl = '';
+
+saveQrBtn?.addEventListener('click', async () => {
+  if (typeof qrcode === 'undefined') {
+    alert('Biblioteca de QR não carregou — verifique conexão.');
+    return;
+  }
+  const url = await currentShareUrl();
+  if (!url) return;
+  showQrModal(url);
+});
+
+qrClose?.addEventListener('click', () => (qrModal.hidden = true));
+qrModal?.addEventListener('click', (e) => {
+  if (e.target === qrModal) qrModal.hidden = true;
+});
+qrCopyBtn?.addEventListener('click', async () => {
+  if (!qrCurrentUrl) return;
+  try {
+    await navigator.clipboard.writeText(qrCurrentUrl);
+    showToast('URL copiada');
+  } catch {
+    window.prompt('Copie o URL:', qrCurrentUrl);
+  }
+});
+qrDownloadSvgBtn?.addEventListener('click', () => {
+  if (!qrCurrentSvg) return;
+  downloadBlob(
+    new Blob([qrCurrentSvg], { type: 'image/svg+xml' }),
+    `qr-${qrFilenameSlug()}.svg`,
+  );
+});
+qrDownloadPngBtn?.addEventListener('click', () => {
+  if (!qrCurrentSvg) return;
+  svgToPngBlob(qrCurrentSvg, 1024).then((blob) => {
+    downloadBlob(blob, `qr-${qrFilenameSlug()}.png`);
+  });
+});
+
+function showQrModal(url) {
+  qrCurrentUrl = url;
+  qrUrlInput.value = url;
+
+  // Pick error correction by URL length: shorter URLs can afford H (more
+  // robust to camera blur), longer ones need L just to fit.
+  let ec = 'H';
+  if (url.length > 350) ec = 'Q';
+  if (url.length > 700) ec = 'M';
+  if (url.length > 1100) ec = 'L';
+
+  // typeNumber=0 → auto-pick smallest version that fits.
+  const qr = qrcode(0, ec);
+  qr.addData(url);
+  qr.make();
+
+  // 4-px cells with 4-cell quiet zone, scalable so the SVG fills the box.
+  qrCurrentSvg = qr.createSvgTag({ cellSize: 4, margin: 4, scalable: true });
+  qrImage.innerHTML = qrCurrentSvg;
+
+  if (url.length > 1500) {
+    qrWarning.textContent =
+      `URL longa (${url.length} chars) — o QR fica denso e pode falhar ao escanear. Considere reduzir o número de waypoints.`;
+    qrWarning.hidden = false;
+  } else {
+    qrWarning.hidden = true;
+  }
+
+  qrModal.hidden = false;
+}
+
+function qrFilenameSlug() {
+  const name = (saveNameInput.value || 'rota').trim();
+  return name
+    .normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
+    .slice(0, 50) || 'rota';
+}
+
+function downloadBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+// SVG string → PNG blob via Canvas. Used for the "Baixar PNG" button so the
+// QR can be pasted into apps that don't render SVG (some chat clients, IG).
+function svgToPngBlob(svgString, size) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = canvas.height = size;
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(0, 0, size, size);
+      ctx.drawImage(img, 0, 0, size, size);
+      canvas.toBlob((blob) => {
+        if (blob) resolve(blob);
+        else reject(new Error('PNG conversion failed'));
+      }, 'image/png');
+    };
+    img.onerror = () => reject(new Error('SVG load failed'));
+    // Embed the SVG via data URL — base64 encode to handle UTF-8 safely.
+    img.src = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svgString)));
+  });
+}
+
 function updateFilenamePreview() {
   saveFilenamePreview.textContent = filenameFromName(saveNameInput.value, new Date());
 }
@@ -2172,7 +2698,7 @@ editGpxInput.addEventListener('change', () => {
 // stored latlngs are already downsampled to ≤400 points by the build
 // script; we further sample them down to ≤MAX_EDIT_WAYPOINTS so the user
 // gets a manageable number of draggable handles.
-const MAX_EDIT_WAYPOINTS = 50;
+const MAX_EDIT_WAYPOINTS = 100;
 async function editEntryInDrawingTool(entry) {
   if (!entry || !Array.isArray(entry.latlngs) || entry.latlngs.length < 2) {
     alert('Este traçado não tem pontos suficientes para editar.');
@@ -2332,7 +2858,7 @@ async function loadGpxIntoEditor(gpxText) {
       }
       if (coords.length > 0) break;
     }
-    const MAX = 50;
+    const MAX = 100;
     let sampled = coords;
     if (coords.length > MAX) {
       sampled = [];
