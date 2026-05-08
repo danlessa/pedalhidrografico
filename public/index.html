@@ -4,6 +4,27 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="theme-color" content="#0f1721" />
+    <!--
+      Content-Security-Policy. Inline scripts are blocked outright (no
+      'unsafe-inline' on script-src). Inline styles are allowed because
+      Leaflet sets per-marker positions via the style attribute. Tile / WMS
+      hosts are unrestricted (img-src https:) since the user can add custom
+      XYZ/WMS layers at runtime. IG embed iframe is whitelisted explicitly.
+    -->
+    <meta http-equiv="Content-Security-Policy" content="
+      default-src 'self';
+      script-src 'self' https://unpkg.com https://cdn.jsdelivr.net;
+      style-src 'self' 'unsafe-inline' https://unpkg.com https://cdn.jsdelivr.net;
+      img-src 'self' data: blob: https:;
+      connect-src 'self' https: blob:;
+      frame-src https://www.instagram.com https://*.instagram.com https://instagram.com;
+      font-src 'self' data:;
+      manifest-src 'self';
+      worker-src 'self';
+      base-uri 'self';
+      form-action 'self';
+      object-src 'none';
+    " />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="Pedal Hidrográfico" />
@@ -254,6 +275,6 @@
     ></script>
     <script src="https://cdn.jsdelivr.net/npm/leaflet.locatecontrol@0.83.1/dist/L.Control.Locate.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js"></script>
-    <script src="app.js"></script>
+    <script src="app.js" type="module"></script>
   </body>
 </html>

@@ -10,6 +10,19 @@ const ROUTES_JSON_URL = 'routes.json';
 const SP = [-23.5505, -46.6333];
 const DAY_MS = 86_400_000;
 
+// First ES-module migration step: pure helpers + toast + storage live in
+// lib/utils.js. The rest of app.js still uses module-level let/const to be
+// migrated incrementally.
+import {
+  escapeHtml,
+  escapeXml,
+  formatHMS,
+  mapConcurrent,
+  haversineMeters as haversine,
+  showToast,
+  storage,
+} from './lib/utils.js';
+
 // ─── Map ─────────────────────────────────────────────────────────────────────
 const map = L.map('map', { zoomControl: true }).setView(SP, 12);
 
@@ -125,10 +138,19 @@ let overpassDebounce = null;
 let overpassFetchSeq = 0;
 
 async function queryOverpass(b) {
+  // Three buckets:
+  //   - waterways within the viewport bbox
+  //   - natural=ridge within the viewport bbox
+  //   - relations tagged cycle_network=BR:PedalHidrografico (no bbox; the
+  //     network is small and local, easier to fetch them all and let the
+  //     viewport clip naturally on draw)
+  // The trailing `>;` recursion expands relations down to their member ways
+  // and nodes so we can render the actual cycle paths.
   const q = `[out:json][timeout:60];
 (
   way["waterway"](${b.south},${b.west},${b.north},${b.east});
   way["natural"="ridge"](${b.south},${b.west},${b.north},${b.east});
+  relation["cycle_network"="BR:PedalHidrografico"];
 );
 out body;
 >;
@@ -142,7 +164,12 @@ out skel qt;`;
   return res.json();
 }
 
-function styleForOverpassWay(tags) {
+function styleForOverpassWay(tags, isCycle) {
+  if (isCycle) {
+    // Pedal Hidrográfico cycle-network member ways: bright accent blue,
+    // thick, on top of everything else.
+    return { color: '#2da9ff', weight: 5, opacity: overpassOpacity };
+  }
   const tunnel = !!tags.tunnel;
   if (tags.natural === 'ridge') {
     return { color: '#EF7A30', weight: 3, opacity: overpassOpacity };
@@ -174,21 +201,49 @@ function clearOverpassLayers() {
 function renderOverpass(data) {
   clearOverpassLayers();
   const nodes = new Map();
+  // First pass: index nodes and collect cycle-network relations + their
+  // member-way IDs so the second pass can style/label cycle ways distinctly.
+  const wayToCycleRelation = new Map(); // way id → relation element
   for (const el of data.elements || []) {
-    if (el.type === 'node') nodes.set(el.id, [el.lat, el.lon]);
+    if (el.type === 'node') {
+      nodes.set(el.id, [el.lat, el.lon]);
+    } else if (
+      el.type === 'relation' &&
+      el.tags &&
+      el.tags.cycle_network === 'BR:PedalHidrografico'
+    ) {
+      for (const member of el.members || []) {
+        if (member.type === 'way') wayToCycleRelation.set(member.ref, el);
+      }
+    }
   }
+
+  // Second pass: render every way.
   for (const el of data.elements || []) {
     if (el.type !== 'way') continue;
     const latlngs = (el.nodes || []).map((id) => nodes.get(id)).filter(Boolean);
     if (latlngs.length < 2) continue;
     const tags = el.tags || {};
-    const layer = L.polyline(latlngs, styleForOverpassWay(tags));
-    const labelParts = [];
-    if (tags.name) labelParts.push(`<strong>${escapeHtml(tags.name)}</strong>`);
-    const kind = tags.waterway || tags.natural || '';
-    if (kind) labelParts.push(`<em>${escapeHtml(kind)}</em>`);
-    if (tags.tunnel) labelParts.push('(túnel)');
-    const html = labelParts.join(' · ') || 'OSM';
+    const cycleRel = wayToCycleRelation.get(el.id);
+    const isCycle = !!cycleRel;
+    const layer = L.polyline(latlngs, styleForOverpassWay(tags, isCycle));
+
+    let html;
+    if (isCycle) {
+      const relName = cycleRel.tags?.name || 'Pedal Hidrográfico';
+      const ref = cycleRel.tags?.ref;
+      const parts = [`<strong>${escapeHtml(relName)}</strong>`];
+      if (ref) parts.push(`<em>ref ${escapeHtml(ref)}</em>`);
+      if (tags.name) parts.push(escapeHtml(tags.name));
+      html = parts.join(' · ');
+    } else {
+      const parts = [];
+      if (tags.name) parts.push(`<strong>${escapeHtml(tags.name)}</strong>`);
+      const kind = tags.waterway || tags.natural || '';
+      if (kind) parts.push(`<em>${escapeHtml(kind)}</em>`);
+      if (tags.tunnel) parts.push('(túnel)');
+      html = parts.join(' · ') || 'OSM';
+    }
     layer.bindTooltip(html, { sticky: true, className: 'osm-tip' });
     layer.addTo(map);
     overpassLayers.push(layer);
@@ -1012,33 +1067,7 @@ function wireUpPopupLinks() {
   });
 }
 
-// ─── Utils ───────────────────────────────────────────────────────────────────
-function escapeHtml(s) {
-  return String(s).replace(/[&<>"']/g, (c) =>
-    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c],
-  );
-}
-
-function escapeXml(s) {
-  return String(s).replace(/[<>&"']/g, (c) =>
-    ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&apos;' })[c],
-  );
-}
-
-// Lightweight non-blocking toast for one-shot status messages.
-const toastEl = document.getElementById('toast');
-let toastTimer = null;
-function showToast(msg, ms = 3500) {
-  if (!toastEl) return;
-  toastEl.textContent = msg;
-  toastEl.hidden = false;
-  toastEl.classList.remove('fade');
-  clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => {
-    toastEl.classList.add('fade');
-    setTimeout(() => { toastEl.hidden = true; }, 300);
-  }, ms);
-}
+// ─── Utils ─── (moved to lib/utils.js — imported at the top of this file)
 
 // ─── GPX drawing tool ────────────────────────────────────────────────────────
 // Each click is a USER WAYPOINT. Between consecutive waypoints we render a
@@ -1111,6 +1140,7 @@ function saveParams() {
 
 let drawingMode = false;
 let defaultSaveName = ''; // pre-populated by GPX import / route-modal edit
+let layersWasVisible = false; // remembers panel state across drawing sessions
 // Each trackpoint is a user waypoint.
 //   pathFromPrev: [[lat,lng], ...] inclusive of both endpoints.
 //                 null for the first waypoint.
@@ -1182,6 +1212,13 @@ function enterDrawingMode() {
   // Map's default double-click-to-zoom would compete with our "dbl-click line
   // to add a waypoint" gesture, so suspend it for the duration of drawing.
   map.doubleClickZoom.disable();
+  // Tuck the layer panel away while drawing so it can't crowd the trace
+  // controls. Remember its prior state to restore on exit.
+  layersWasVisible = !document.body.classList.contains('layers-hidden');
+  if (layersWasVisible) {
+    document.body.classList.add('layers-hidden');
+    if (layersBtn) layersBtn.setAttribute('aria-pressed', 'false');
+  }
   traceBtn.textContent = 'Salvar GPX';
   traceControls.hidden = false;
   updateTraceControls();
@@ -1222,6 +1259,12 @@ function exitDrawingMode() {
 
   map.off('click', onMapClickInDrawing);
   map.doubleClickZoom.enable();
+  // Restore the layer panel if drawing mode had hidden it.
+  if (layersWasVisible) {
+    document.body.classList.remove('layers-hidden');
+    if (layersBtn) layersBtn.setAttribute('aria-pressed', 'true');
+    layersWasVisible = false;
+  }
   traceBtn.textContent = 'Traçar GPX';
   traceControls.hidden = true;
   defaultSaveName = '';
@@ -1991,15 +2034,7 @@ function updateMetrics() {
     (sim.elevMissing > 0 ? `\n\n${sim.elevMissing} ponto(s) ainda sem elevação.` : '');
 }
 
-function formatHMS(sec) {
-  const total = Math.max(0, Math.round(sec));
-  const h = Math.floor(total / 3600);
-  const m = Math.floor((total % 3600) / 60);
-  const s = total % 60;
-  const pad = (n) => String(n).padStart(2, '0');
-  if (h > 0) return `${h}h ${pad(m)}m ${pad(s)}s`;
-  return `${m}m ${pad(s)}s`;
-}
+// formatHMS() now imported from lib/utils.js
 
 // ─── Params modal ────────────────────────────────────────────────────────────
 const paramsBtn = document.getElementById('params-btn');
@@ -2382,6 +2417,10 @@ async function tryLoadFromShareHash() {
     }
 
     if (state.n) defaultSaveName = state.n;
+    // Strip the #st=… so a later page reload doesn't clobber edits with the
+    // original shared route. The state lives in localStorage / drawing
+    // session memory now; the URL has done its job.
+    history.replaceState(null, '', location.pathname + location.search);
     redrawAndMetrics();
     updateTraceControls();
 
@@ -2389,7 +2428,10 @@ async function tryLoadFromShareHash() {
     if (bounds.isValid()) map.fitBounds(bounds, { padding: [40, 40] });
 
     if (routingMode !== 'straight') {
-      for (let i = 1; i < trackpoints.length; i++) await refetchPath(i);
+      // Up to 4 OSRM requests in flight at once — keeps within the public
+      // demo's rate limit while cutting end-to-end load by ~4× on long routes.
+      const indices = Array.from({ length: trackpoints.length - 1 }, (_, i) => i + 1);
+      await mapConcurrent(indices, 4, refetchPath);
       redrawAndMetrics();
     }
     pushHistory();
@@ -2789,16 +2831,7 @@ async function editEntryInDrawingTool(entry) {
 }
 
 // Distance between two lat/lng pairs in meters (haversine, no Leaflet dep).
-function haversine(lat1, lng1, lat2, lng2) {
-  const R = 6371000;
-  const toRad = (d) => (d * Math.PI) / 180;
-  const dLat = toRad(lat2 - lat1);
-  const dLng = toRad(lng2 - lng1);
-  const a =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
-  return 2 * R * Math.asin(Math.sqrt(a));
-}
+// haversine() now imported from lib/utils.js
 
 async function loadGpxIntoEditor(gpxText) {
   let doc;
@@ -2932,9 +2965,8 @@ async function loadGpxIntoEditor(gpxText) {
 
   // Re-route in the background if the loaded mode wants OSRM.
   if (routingMode !== 'straight') {
-    for (let i = 1; i < trackpoints.length; i++) {
-      await refetchPath(i);
-    }
+    const indices = Array.from({ length: trackpoints.length - 1 }, (_, i) => i + 1);
+    await mapConcurrent(indices, 4, refetchPath);
     redrawAndMetrics();
   }
   pushHistory();

@@ -9,7 +9,7 @@
 //                    their second visit.
 //   RUNTIME_CACHE — map tiles, OSRM, elevation, etc. Same strategy.
 
-const VERSION = 'phidro-v2';
+const VERSION = 'phidro-v3';
 const STATIC_CACHE = `${VERSION}-static`;
 const RUNTIME_CACHE = `${VERSION}-runtime`;
 
@@ -26,6 +26,7 @@ const STATIC_ASSETS = [
   './icon-192.png',
   './icon-512.png',
   './apple-touch-icon.png',
+  './lib/utils.js',
 ];
 
 self.addEventListener('install', (event) => {
